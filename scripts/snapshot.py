@@ -100,7 +100,8 @@ def write_to_csv(path, points):
         ["staker address",
          "first stake points",
          "last check in points",
-         "max points"])
+         "max points",
+         "baseBooty"])
 
         writer.writeheader()
         for staker in points:
@@ -108,7 +109,8 @@ def write_to_csv(path, points):
                 {"staker address": staker,
                  "first stake points": points[staker]["firstStakePoints"][0],
                  "last check in points": points[staker]["latestCheckinPoints"][0],
-                 "max points": points[staker]["maxEverSpankPoints"][0]
+                 "max points": points[staker]["maxEverSpankPoints"][0],
+                 "baseBooty": points[staker]["baseBooty"]
                  })
 
 
@@ -238,8 +240,9 @@ def calculate_points(events, qualified_stakers):
             spank_points_dict[staker]["firstStakePoints"] = ("N/A", 0)
         if "latestCheckinPoints" not in spank_points_dict[staker]:
             spank_points_dict[staker]["latestCheckinPoints"] = ("N/A", 0)
+        spank_points_dict[staker]["baseBooty"] = qualified_stakers["stakerInfo"][staker][4]
 
-    print("Discrepancy of: " + str(len(qualified_stakers) - len(spank_points_dict)) + " stakers")
+    print("Discrepancy of: " + str(len(spank_points_dict) - len(qualified_stakers)) + " stakers")
 
     return dict(spank_points_dict)
 

@@ -169,10 +169,6 @@ def get_qualified_stakers(events):
 
     stakers = sorted(new_stakers | split_stakers | checkin_stakers)
     print(len(stakers), "stakers")
-<<<<<<< HEAD
-=======
-    snapshot_end_time = chain[cutoff_height].timestamp
->>>>>>> a11d51c (Update blockheight window)
     calls = [
         [str(spankbank), spankbank.stakers.encode_input(staker)] for staker in stakers
     ]
@@ -197,7 +193,6 @@ def calculate_points(events, qualified_stakers):
     - latest checkin
     - highest ever
     """
-<<<<<<< HEAD
     events = groupby("event", events)
     spank_points_dict = defaultdict(dict)
 
@@ -247,16 +242,6 @@ def calculate_points(events, qualified_stakers):
     print("Discrepancy of: " + str(len(qualified_stakers) - len(spank_points_dict)) + " stakers")
 
     return dict(spank_points_dict)
-=======
-    balances = transfers_to_balances(spank, spank_deploy, cutoff_height)
-    # FIX: initial balance misses an event assigning it
-    spank_deployer = "0xA7f00de671ebEB1b04C19a00842ff1d980847f0B"
-    balances[spank_deployer] += 10 ** 27
-    # NOTE: sanity check
-    for addr in [spank_deployer, str(spankbank)]:
-        assert balances[addr] == spank.balanceOf(addr, block_identifier=cutoff_height)
-    return balances
->>>>>>> a11d51c (Update blockheight window)
 
 
 @cached("snapshot/06-contracts.json")
@@ -272,167 +257,6 @@ def find_contracts(balances):
     return contracts
 
 
-<<<<<<< HEAD
-=======
-@cached("snapshot/07-uniswap.json")
-def calc_uniswap(contracts):
-    replacements = {}
-    for address in contracts:
-        if not is_uniswap(address):
-            continue
-
-        # no need to check the pool contents since we already know the equivalent value
-        # so we just grab the lp share distribution and distirbute the tokens pro-rata
-
-        balances = transfers_to_balances(
-            interface.ERC20(address), uniswap_v2_deploy, cutoff_height
-        )
-        supply = sum(balances.values())
-        if not supply:
-            continue
-        replacements[address] = {
-            user: int(Fraction(balances[user], supply) * contracts[address])
-            for user in balances
-        }
-        assert (
-            sum(replacements[address].values()) <= contracts[address]
-        ), "no inflation ser"
-
-    return replacements
-
-
-@cached("snapshot/08-unwrapped.json")
-def unwrap_balances(balances, replacements):
-    for remove, additions in replacements.items():
-        balances.pop(remove)
-        for user, balance in additions.items():
-            balances.setdefault(user, 0)
-            balances[user] += balance
-    return dict(Counter(balances).most_common())
-
-
-@cached("snapshot/09-distribution.json")
-def prepare_distribution(points, staked_balances, snapshot_balances):
-    assert POINTS_TOTAL + STAKED_TOTAL + SNAPSHOT_TOTAL == DISTRIBUTION_TOTAL
-
-    distribution = Counter()
-
-    points_amounts = Counter()
-    for period in points:
-        for user, amount in points[period].items():
-            if user in EXCLUDED:
-                continue
-            points_amounts[user] += amount
-    ratio = Fraction(POINTS_TOTAL, sum(points_amounts.values()))
-    for user, amount in points_amounts.items():
-        distribution[user] += int(amount * ratio)
-
-    staked_amounts = Counter()
-    for period in staked_balances:
-        for user, amount in staked_balances[period]["stakers"].items():
-            if user in EXCLUDED:
-                continue
-            staked_amounts[user] += amount
-    ratio = Fraction(STAKED_TOTAL, sum(staked_amounts.values()))
-    for user, amount in staked_amounts.items():
-        distribution[user] += int(amount * ratio)
-
-    snapshot_amounts = Counter()
-    for user, amount in snapshot_balances.items():
-        if user in EXCLUDED:
-            continue
-        snapshot_amounts[user] += amount
-    ratio = Fraction(SNAPSHOT_TOTAL, sum(snapshot_amounts.values()))
-    for user, amount in snapshot_amounts.items():
-        distribution[user] += int(amount * ratio)
-
-    distribution = {
-        user: amount for user, amount in distribution.items() if amount >= DUST
-    }
-
-    distribution_total = sum(distribution.values())
-    ratio = Fraction(DISTRIBUTION_TOTAL, distribution_total)
-    distribution = {user: int(amount * ratio) for user, amount in distribution.items()}
-    assert sum(distribution.values()) <= DISTRIBUTION_TOTAL, "no inflation ser"
-
-    print("target:", DISTRIBUTION_TOTAL.to("ether"))
-    print("actual:", Wei(sum(distribution.values())).to("ether"))
-    print("recipients:", len(distribution))
-
-    return dict(Counter(distribution).most_common())
-
-
-@cached("snapshot/10-merkle-distribution.json")
-def prepare_merkle_tree(balances):
-    elements = [
-        (index, account, amount)
-        for index, (account, amount) in enumerate(balances.items())
-    ]
-    nodes = [
-        encode_hex(encode_abi_packed(["uint", "address", "uint"], el))
-        for el in elements
-    ]
-    tree = MerkleTree(nodes)
-    distribution = {
-        "merkleRoot": encode_hex(tree.root),
-        "tokenTotal": hex(sum(balances.values())),
-        "claims": {
-            user: {
-                "index": index,
-                "amount": hex(amount),
-                "proof": tree.get_proof(nodes[index]),
-            }
-            for index, user, amount in elements
-        },
-    }
-    print(f"merkle root: {encode_hex(tree.root)}")
-    return distribution
-
-
-def deploy():
-    user = accounts.load(input("account: "))
-    tree = json.load(open("snapshot/10-merkle-distribution.json"))
-    root = tree["merkleRoot"]
-    token = str(spank)
-    MerkleDistributor.deploy(token, root, {"from": user})
-
-
-def claim():
-    claimer = accounts.load(input("account: "))
-    dist = MerkleDistributor.at(DISTRIBUTOR_ADDRESS)
-    tree = json.load(open("snapshot/10-merkle-distribution.json"))
-    claim_other = input("Claim for another account? y/n [default: n] ") or "n"
-    assert claim_other in {"y", "n"}
-    user = str(claimer) if claim_other == "n" else input("Enter address to claim for: ")
-
-    if user not in tree["claims"]:
-        return secho(f"{user} is not included in the distribution", fg="red")
-    claim = tree["claims"][user]
-    if dist.isClaimed(claim["index"]):
-        return secho(f"{user} has already claimed", fg="yellow")
-
-    amount = Wei(int(claim["amount"], 16)).to("ether")
-    secho(f"Claimable amount: {amount} UNI", fg="green")
-    dist.claim(claim["index"], user, claim["amount"], claim["proof"], {"from": claimer})
-
-
-def transfers_to_balances(contract, deploy_block, snapshot_block):
-    balances = Counter()
-    contract = web3.eth.contract(str(contract), abi=contract.abi)
-    step = 10000
-    for start in trange(deploy_block, snapshot_block, step):
-        end = min(start + step - 1, snapshot_block)
-        logs = contract.events.Transfer().getLogs(fromBlock=start, toBlock=end)
-        for log in logs:
-            if log["args"]["src"] != ZERO_ADDRESS:
-                balances[log["args"]["src"]] -= log["args"]["wad"]
-            if log["args"]["dst"] != ZERO_ADDRESS:
-                balances[log["args"]["dst"]] += log["args"]["wad"]
-
-    return valfilter(bool, dict(balances.most_common()))
-
-
->>>>>>> a11d51c (Update blockheight window)
 def timestamp_to_block_number(ts):
     lo = 0
     hi = chain.height - 30  # fix for "block not found"
